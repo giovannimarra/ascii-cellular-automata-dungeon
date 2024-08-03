@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Random Dungeon</title>
+    
+    <script src="p5.js"></script>
+    <script src="p5.sound.js"></script>
+    <script src="sketch.js"></script>
+
+    <style>
+        html, body {
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #000;
+        }
+        body {
+            font-family: monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        pre {
+            display: inline-block;
+            margin: auto;
+            text-align: center;
+            font-size: 12px;
+            line-height: 0.75;
+        }
+        #player-stats {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: white;
+            background-color: rgba(0, 0, 0, 0.5); /* Optional for better visibility */
+            padding: 10px;
+            border-radius: 5px;
+            text-align: right;
+            font-size: 14px;
+        }
+
+        #inventory {
+            position: absolute;
+            top: 10%;
+            left: 10%;
+            transform: translate(-50%, -50%);
+            padding: 20px;
+            color: white;
+            border: 2px solid #fff;
+            border-radius: 0;
+            text-align: center;
+        }
+        #combat-info, #win {
+            font-size: 18px;
+
+            color: white;
+        }
+        #your-attack {
+            color: #0f0;
+            font-size: 24px;
+        }
+        #enemy-attack {
+            color: #f00;
+            font-size: 24px;
+        }
+        #instructions {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-size: 16px;
+            padding: 5px;
+        }
+        #game-over {
+            text-align: center;
+            color: white;
+            margin: 0;
+            padding: 0;
+        }
+    </style>
+</head>
+
+<body>
+    <pre id="map"></pre>
+    <div id="instructions">Move player with arrows <br> Open the inventory with E</div>
+
+    <div id="player-stats">
+        <p>HP: <span id="player-hp"></span></p>
+        <p>Danno: <span id="player-damage"></span></p>
+    </div>
+    
+
+    <div id="combat-screen" style="display: none;">
+        <h2>Combattimento</h2>
+        <p id="combat-info"></p>
+        <button id="attack-button" onclick='ca.playerAttack()'>Attacca</button>
+    </div>
+
+    <div id="inventory" style="display: none;">
+        <h2>Inventario</h2>
+        <p id="collected-items">Soldi: 0</p>
+    </div>
+
+    <div id="your-attack" style="display: none;"><p>Il nemico attacca !</p></div>
+    <div id="enemy-attack" style="display: none;"><p>Il nemico attacca !</p></div>
+    <div id="win" style="display: none;">
+        <p>Hai vinto !</p>
+    </div>
+    <div id="game-over" style="display: none;">
+        <p>Hai perso !</p>
+    </div>
+
+    <canvas></canvas>
+
+    <script>
+        class Enemy {
+            constructor(x, y, health, attackPower) {
+                this.x = x; 
+                this.y = y; 
+                this.health = health; 
+                this.attackPower = attackPower; 
+            }
+        }
+        
+        class CellularAutomata {
+            constructor(width, height, initialFillProb, steps, numEnemies, numItems) {
+                this.width = width; 
+                this.height = height; 
+                this.grid = this.createGrid(initialFillProb);
+                this.steps = steps; 
+                this.playerPos = this.spawnPlayer(); 
+                this.enemies = this.spawnEnemies(numEnemies);
+                this.items = this.spawnItems(numItems);
+                this.collectedItems = 0; 
+                this.playerHealth = 200;
+                this.damage = 10; 
+                this.currentEnemy = null; 
+                this.updatePlayerStats(); // Call the update function on initialization
+ 
+            }
+
+            createGrid(initialFillProb) {
+                let grid = [];  
+                for (let y = 0; y < this.height; y++) {  
+                    let row = [];
+                    for (let x = 0; x < this.width; x++) {  
+                        row.push(Math.random() < initialFillProb ? 1 : 0); 
+                    }
+                    grid.push(row); 
+                }
+                return grid; 
+            }
+
+            countAliveNeighbors(x, y) {
+                let count = 0;
+                for (let dy = -1; dy <= 1; dy++) {
+                    for (let dx = -1; dx <= 1; dx++) {
+                        if (dx === 0 && dy === 0) continue;
+                        let nx = x + dx;
+                        let ny = y + dy;
+                        if (nx < 0 || nx >= this.width || ny < 0 || ny >= this.height) continue;
+                        count += this.grid[ny][nx];
+                    }
+                }
+                return count;
+            }
+
+            step() {
+                let newGrid = this.createGrid(0);
+                for (let y = 0; y < this.height; y++) {
+                    for (let x = 0; x < this.width; x++) {
+                        let aliveNeighbors = this.countAliveNeighbors(x, y);
+                        if (this.grid[y][x] === 1) {
+                            newGrid[y][x] = aliveNeighbors >= 4 ? 1 : 0;
+                        } else {
+                            newGrid[y][x] = aliveNeighbors >= 5 ? 1 : 0;
+                        }
+                    }
+                }
+                this.grid = newGrid;
+            }
+
+            generate() {
+                for (let i = 0; i < this.steps; i++) {
+                    this.step();
+                }
+            }
+
+            spawnItems(numItems) {
+                let items = [];
+                for (let j = 0; j < numItems; j++) {
+                    let x, y;
+                    do {
+                        x = Math.floor(Math.random() * this.width); 
+                        y = Math.floor(Math.random() * this.height);
+                    } while (this.grid[y][x] !== 0 || this.isOccupiedByPlayerOrEnemy(x, y));
+                    items.push({ x, y });
+                }
+                return items;
+            }
+
+            isOccupiedByPlayerOrEnemy(x, y) {
+                if (this.playerPos.x === x && this.playerPos.y === y) return true;
+                if (this.enemies.some(enemy => enemy.x === x && enemy.y === y)) return true;
+                return false;
+            }
+
+            spawnEnemies(numEnemies) {
+                let enemies = [];
+                while (enemies.length < numEnemies) {
+                    let x = Math.floor(Math.random() * this.width);
+                    let y = Math.floor(Math.random() * this.height);
+                    if (this.grid[y][x] === 0) {
+                        enemies.push(new Enemy(x, y, 100, 20)); 
+                    }
+                }
+                return enemies;
+            }
+
+            spawnPlayer() {
+                let x, y; 
+                do {
+                    x = Math.floor(Math.random() * this.width);
+                    y = Math.floor(Math.random() * this.height);
+                } while (this.grid[y][x] !== 0); 
+                return { x, y };
+            }
+            
+            collectItem(x, y) {
+                const itemIndex = this.items.findIndex(item => item.x === x && item.y === y);
+                if (itemIndex !== -1) {
+                    this.items.splice(itemIndex, 1);
+                    this.collectedItems++;
+                    this.damage += this.collectedItems * 2;
+                    this.updateInventory(); 
+                }
+            }
+
+            startCombat(enemy) {
+                this.currentEnemy = enemy; 
+                this.updateCombatScreen(); 
+                document.getElementById('combat-screen').style.display = 'block'; 
+            }
+
+            updateCombatScreen() {
+                document.getElementById('combat-info').innerText = 
+                `Giocatore: ${this.playerHealth} HP\nNemico: ${this.currentEnemy.health} HP`;
+                document.getElementById('your-attack').innerText = 
+                `Attacchi! -${this.damage} HP`;
+                document.getElementById('enemy-attack').innerText = 
+                `Il nemico attacca! -${this.currentEnemy.attackPower} HP`;
+
+                this.updatePlayerStats();
+
+            }
+
+            updatePlayerStats(){
+                document.getElementById('player-hp').innerText = this.playerHealth;
+                document.getElementById('player-damage').innerText = this.damage;
+            };
+
+
+            playerAttack() {
+                if (this.currentEnemy) {
+                    this.currentEnemy.health -= this.damage;
+                    if (this.currentEnemy.health <= 0) {
+                        this.currentEnemy.health = 0; 
+                        this.endCombat(true);
+                    } else {
+                        document.getElementById('combat-screen').style.display = 'none';
+                        document.getElementById('your-attack').style.display = 'block';
+                        document.getElementById('enemy-attack').style.display = 'block';
+
+                        setTimeout(() => {
+                            this.enemyAttack();
+                            document.getElementById('combat-screen').style.display = 'block';
+                            document.getElementById('your-attack').style.display = 'none';
+                            document.getElementById('enemy-attack').style.display = 'none';
+                        }, 2000);
+                    }
+                    this.updateCombatScreen();
+                }
+            }
+
+            enemyAttack() {
+                if (this.currentEnemy) {
+                    const damage = this.currentEnemy.attackPower; 
+                    this.playerHealth -= damage; 
+                    if (this.playerHealth <= 0) {
+                        this.endCombat(false); 
+                    } else {
+                        this.updateCombatScreen();
+                    }
+                }
+            }
+
+            endCombat(playerWins) {
+                if (playerWins) {
+                    this.enemies = this.enemies.filter(enemy => enemy !== this.currentEnemy);
+                    document.getElementById('win').style.display = 'block';
+                    setTimeout(() => {
+                        document.getElementById('win').style.display = 'none';;
+                    }, 1500);
+                } else {
+                    document.getElementById('game-over').style.display = 'block';
+                    setTimeout(() => {
+                        location.reload();
+                    }, 1000);
+                }
+                this.currentEnemy = null; 
+                document.getElementById('combat-screen').style.display = 'none';
+                this.updateGameScreen();
+            }
+
+            updateInventory() {
+                document.getElementById('collected-items').innerText = `Soldi: ${this.collectedItems}`;
+            }
+
+            movePlayer(dx, dy) {
+                const newX = this.playerPos.x + dx; 
+                const newY = this.playerPos.y + dy; 
+                if (newX >= 0 && newX < this.width && newY >= 0 && newY < this.height && this.grid[newY][newX] === 0) {
+                    const enemy = this.enemies.find(enemy => enemy.x === newX && enemy.y === newY);
+                    if (enemy) {
+                        this.startCombat(enemy);
+                    } else {
+                        this.playerPos.x = newX;
+                        this.playerPos.y = newY;
+                        this.collectItem(newX, newY);
+                        this.updateGameScreen();
+                    }
+                }
+            }
+
+            updateGameScreen() {
+                document.getElementById('map').innerHTML = this.getMapString();
+            }
+
+            getCellColor(x, y) {
+                if (this.grid[y][x] === 1) {
+                    let neighbors = this.countAliveNeighbors(x, y); 
+                    if (neighbors >= 8) {
+                        return '#B8860B'; 
+                    } else if (neighbors > 5) {
+                        return '#228B22';
+                    } else {
+                        return '#ADFF2F';
+                    }
+                } else {
+                    return 'transparent'; 
+                }
+            }
+
+            getMapString() {
+                let mapString = '';
+                for (let y = 0; y < this.height; y++) {
+                    for (let x = 0; x < this.width; x++) {
+                        if (this.playerPos.x === x && this.playerPos.y === y) {
+                            mapString += `<span style="color: #ffffd9;">@</span>`;
+                        } else if (this.enemies.some(enemy => enemy.x === x && enemy.y === y)) {
+                            mapString += `<span style="color: #f00;">X</span>`;
+                        } else if (this.items.some(item => item.x === x && item.y === y)) {
+                            mapString += '<span style="color: #00BFFF;">$</span>';
+                        } else {
+                            if (this.grid[y][x] === 1) {
+                                const color = this.getCellColor(x, y);
+                                mapString += `<span style="color: ${color};">^</span>`;
+                            } else {
+                                mapString += `<span style="color:#00FFFF;"> </span>`;
+                            }
+                        }
+                    }
+                    mapString += '<br>';
+                }
+                return mapString;
+            }
+        }
+
+        let width = 75; 
+        let height = 50; 
+        let initialFillProb = 0.45; 
+        let steps = 5;
+        let numEnemies = 12;
+        let numItems = 10;
+
+        let ca = new CellularAutomata(width, height, initialFillProb, steps, numEnemies, numItems);
+        ca.generate();
+        ca.updateGameScreen();
+
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'ArrowUp') {
+                ca.movePlayer(0, -1);
+            } else if (event.key === 'ArrowDown') {
+                ca.movePlayer(0, 1);
+            } else if (event.key === 'ArrowLeft') {
+                ca.movePlayer(-1, 0);
+            } else if (event.key === 'ArrowRight') {
+                ca.movePlayer(1, 0);
+            } else if (event.key === 'e' || event.key === 'E') {
+                toggleInventory();
+            }
+        });
+
+        function toggleInventory() {
+            const inventory = document.getElementById('inventory'); 
+            inventory.style.display = inventory.style.display === 'none' ? 'block' : 'none';
+        }
+
+    </script>
+</body>
+</html>
